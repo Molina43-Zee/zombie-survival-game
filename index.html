@@ -6,8 +6,8 @@
   <title>Last Stand: No One Left Behind</title>
   <style>
     :root {
-      --bg1: #0a1014;
-      --bg2: #101c22;
+      --bg1: #090d12;
+      --bg2: #101b1e;
       --panel: rgba(10, 18, 21, 0.7);
       --line: rgba(255,255,255,0.09);
       --text: #edf6ff;
@@ -44,10 +44,9 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      background: radial-gradient(circle at center, rgba(10,18,20,0.6), rgba(0,0,0,0.82));
+      background: radial-gradient(circle at center, rgba(10,18,20,0.62), rgba(0,0,0,0.85));
       z-index: 50;
     }
-
     #menu.hidden { display: none; }
 
     .card {
@@ -79,7 +78,7 @@
     }
 
     .intro {
-      max-width: 600px;
+      max-width: 620px;
       margin: 0 auto 26px;
       color: var(--muted);
       font-size: 16px;
@@ -236,7 +235,6 @@
       transform: translate(-50%, -50%);
       background: rgba(122,233,160,0.9);
     }
-
     .crosshair::before { width: 2px; height: 16px; }
     .crosshair::after { width: 16px; height: 2px; }
 
@@ -346,7 +344,6 @@
       z-index: 30;
       box-shadow: 0 12px 26px rgba(0,0,0,0.28);
     }
-
     .message.show { opacity: 1; }
 
     .flash {
@@ -358,7 +355,6 @@
       z-index: 25;
       transition: opacity 0.12s linear;
     }
-
     .flash.show { opacity: 1; }
 
     .gameover {
@@ -373,7 +369,6 @@
       visibility: hidden;
       transition: opacity 0.25s ease, visibility 0.25s ease;
     }
-
     .gameover.show {
       opacity: 1;
       visibility: visible;
@@ -466,6 +461,7 @@
         Click / Space – Shoot<br>
         R – Reload<br>
         E – Revive / Loot<br>
+        H – Medkit<br>
         Shift – Sprint
       </div>
     </div>
@@ -498,7 +494,6 @@
     const world = {
       width: 18,
       height: 18,
-      tile: 1,
       map: [
         "111111111111111111",
         "100000010000000001",
@@ -517,11 +512,8 @@
         "101111110010111101",
         "100000000000000001",
         "111111111111111111",
-      ]
+      ].map(row => row.split(''))
     };
-
-    // world.map is 17x17; we keep as array of strings.
-    world.map = world.map.map(row => row.split(''));
 
     const keys = {};
     const state = {
@@ -530,7 +522,7 @@
       width: window.innerWidth,
       height: window.innerHeight,
       fov: Math.PI / 3,
-      rayCount: 360,
+      rayCount: 320,
       player: null,
       zombies: [],
       team: [],
@@ -542,9 +534,9 @@
       elapsed: 0,
       lastTime: 0,
       spawnTimer: 0,
-      fireDelay: 0,
       pointerLocked: false,
-      totalKillsTargetBase: 16
+      startTime: 0,
+      killTarget: 20
     };
 
     function rnd(min, max) { return min + Math.random() * (max - min); }
@@ -640,7 +632,7 @@
         x, z,
         hp: 28 + state.wave * 7,
         maxHp: 28 + state.wave * 7,
-        speed: 1.1 + state.wave * 0.12 + Math.random() * 0.4,
+        speed: 1.1 + state.wave * 0.13 + Math.random() * 0.5,
         radius: 0.5,
         hitFlash: 0,
         attackCooldown: 0,
@@ -660,8 +652,10 @@
       state.spawnTimer = 0.4;
       state.running = true;
       state.gameOver = false;
+      state.startTime = performance.now();
+      state.killTarget = 18 + (state.wave * 10);
       showMessage('Stay together');
-      renderHud();
+      updateHud();
     }
 
     function updateHud() {
@@ -687,14 +681,20 @@
       }
     }
 
-    function renderHud() { updateHud(); }
-
-    function rotateToFaceTarget(x, z) {
+    function reload() {
       const p = state.player;
-      const dx = x - p.x;
-      const dz = z - p.z;
-      const targetAngle = Math.atan2(dz, dx);
-      p.angle = targetAngle;
+      if (p.reloadTimer > 0 || p.ammo >= 30 || p.reserveAmmo <= 0) return;
+      p.reloadTimer = 1.2;
+      reloadSound();
+      showMessage('Reloading');
+    }
+
+    function finishReload() {
+      const p = state.player;
+      const need = Math.min(30 - p.ammo, p.reserveAmmo);
+      p.ammo += need;
+      p.reserveAmmo -= need;
+      p.reloadTimer = 0;
     }
 
     function shoot() {
@@ -720,7 +720,7 @@
         const dist = Math.hypot(dx, dz);
         const angleTo = Math.atan2(dz, dx) - p.angle;
         const n = Math.atan2(Math.sin(angleTo), Math.cos(angleTo));
-        if (dist < 12 && Math.abs(n) < 0.2) {
+        if (dist < 12 && Math.abs(n) < 0.22) {
           const score = Math.abs(n) + dist * 0.12;
           if (score < bestScore) {
             best = z;
@@ -732,6 +732,7 @@
       if (best) {
         best.hp -= 20;
         best.hitFlash = 0.15;
+        spawnParticles(best.x, best.z, '#ff8d6e', 10);
         if (best.hp <= 0) {
           best.dead = true;
           state.kills += 1;
@@ -743,20 +744,26 @@
       if (p.ammo === 0 && p.reserveAmmo > 0) reload();
     }
 
-    function reload() {
-      const p = state.player;
-      if (p.reloadTimer > 0 || p.ammo >= 30 || p.reserveAmmo <= 0) return;
-      p.reloadTimer = 1.2;
-      reloadSound();
-      showMessage('Reloading');
+    function spawnParticles(x, z, color, count = 8) {
+      for (let i = 0; i < count; i++) {
+        state.particles.push({
+          x, z,
+          vx: rnd(-1.2, 1.2),
+          vz: rnd(-1.2, 1.2),
+          life: rnd(0.2, 0.6),
+          color
+        });
+      }
     }
 
-    function finishReload() {
-      const p = state.player;
-      const need = Math.min(30 - p.ammo, p.reserveAmmo);
-      p.ammo += need;
-      p.reserveAmmo -= need;
-      p.reloadTimer = 0;
+    function updateParticles(dt) {
+      for (let i = state.particles.length - 1; i >= 0; i--) {
+        const p = state.particles[i];
+        p.x += p.vx * dt;
+        p.z += p.vz * dt;
+        p.life -= dt;
+        if (p.life <= 0) state.particles.splice(i, 1);
+      }
     }
 
     function updatePlayer(dt) {
@@ -786,6 +793,7 @@
         if (p.reloadTimer <= 0) finishReload();
       }
 
+      // pickups
       for (const item of state.pickups) {
         const dist = Math.hypot(item.x - p.x, item.z - p.z);
         if (dist < 1.2) {
@@ -846,7 +854,7 @@
 
         const playerDist = Math.hypot(p.x - t.x, p.z - t.z);
         if (playerDist > 8) {
-          t.health -= dt * 10;
+          t.health -= dt * 8;
           if (t.health <= 0) {
             t.alive = false;
             showMessage(`${t.name} down`);
@@ -855,33 +863,14 @@
       }
     }
 
-    function updateParticles(dt) {
-      for (let i = state.particles.length - 1; i >= 0; i--) {
-        const p = state.particles[i];
-        p.x += p.vx * dt;
-        p.z += p.vz * dt;
-        p.life -= dt;
-        if (p.life <= 0) state.particles.splice(i, 1);
-      }
-    }
-
-    function spawnParticles(x, z, color, count = 8) {
-      for (let i = 0; i < count; i++) {
-        state.particles.push({
-          x, z,
-          vx: rnd(-1.2, 1.2),
-          vz: rnd(-1.2, 1.2),
-          life: rnd(0.2, 0.6),
-          color
-        });
-      }
-    }
-
     function updateZombies(dt) {
       const p = state.player;
       for (let i = state.zombies.length - 1; i >= 0; i--) {
         const z = state.zombies[i];
-        if (z.dead) { state.zombies.splice(i, 1); continue; }
+        if (z.dead) {
+          state.zombies.splice(i, 1);
+          continue;
+        }
 
         z.hitFlash = Math.max(0, z.hitFlash - dt);
 
@@ -906,9 +895,9 @@
         if (!hasWall(z.x, z.z + mz)) z.z += mz;
 
         z.attackCooldown -= dt;
-        if (dist < 1.5 && z.attackCooldown <= 0) {
+        if (dist < 1.4 && z.attackCooldown <= 0) {
           if (target === p) {
-            p.health -= 11;
+            p.health -= 12;
             hurtSound();
             setFlash();
           } else {
@@ -918,8 +907,16 @@
               if (aliveTeam.health <= 0) aliveTeam.alive = false;
             }
           }
-          z.attackCooldown = 1.1;
+          z.attackCooldown = 1.0 + Math.random() * 0.6;
         }
+      }
+    }
+
+    function nextWaveCheck() {
+      const killGoal = 18 + (state.wave * 12);
+      if (state.kills >= killGoal && state.wave < state.maxWaves) {
+        state.wave += 1;
+        showMessage(`Wave ${state.wave}`);
       }
     }
 
@@ -928,22 +925,20 @@
         endGame(false);
         return;
       }
-
       const aliveTeam = state.team.filter(t => t.alive).length;
       if (aliveTeam === 0) {
         endGame(false);
         return;
       }
-
-      const shouldWin = state.wave >= state.maxWaves && state.kills >= state.totalKillsTargetBase + (state.maxWaves - 1) * 12;
-      if (shouldWin) {
+      if (state.wave >= state.maxWaves && state.kills >= 90) {
         endGame(true);
       }
     }
 
     function endGame(won) {
-      state.running = false;
+      if (state.gameOver) return;
       state.gameOver = true;
+      state.running = false;
       const title = document.getElementById('gameoverTitle');
       title.textContent = won ? 'Mission Success' : 'Mission Failed';
       title.className = won ? 'good' : 'bad';
@@ -956,72 +951,24 @@
       gameover.classList.add('show');
     }
 
-    function nextWaveCheck() {
-      const target = state.wave * 14 + 6;
-      if (state.kills >= target && state.wave < state.maxWaves) {
-        state.wave += 1;
-        showMessage(`Wave ${state.wave}`);
-      }
-    }
-
-    function tick(ts) {
-      if (!state.running) {
-        requestAnimationFrame(tick);
-        return;
-      }
-
-      const dt = Math.min((ts - (state.lastTime || ts)) / 1000, 0.033);
-      state.lastTime = ts;
-      state.elapsed += dt;
-
-      if (state.player.reloadTimer <= 0 && keys[' ']) shoot();
-      if (keys['r']) reload();
-
-      updatePlayer(dt);
-      updateTeam(dt);
-      updateParticles(dt);
-
-      state.spawnTimer -= dt;
-      if (state.spawnTimer <= 0) {
-        const active = state.zombies.filter(z => !z.dead).length;
-        const desiredCount = 8 + state.wave * 3;
-        if (active < desiredCount) {
-          spawnZombie();
-        }
-        state.spawnTimer = Math.max(0.35, 1.3 - state.wave * 0.1);
-      }
-
-      updateZombies(dt);
-      nextWaveCheck();
-      checkEndConditions();
-      render();
-      updateHud();
-
-      requestAnimationFrame(tick);
-    }
-
     function castRays() {
       const p = state.player;
       const columns = [];
       const step = state.fov / state.rayCount;
-      const hitMargin = 0.24;
 
       for (let i = 0; i < state.rayCount; i++) {
         const angle = p.angle - state.fov / 2 + i * step;
         let distance = 0;
         let wall = false;
-
         while (!wall && distance < 22) {
           distance += 0.03;
           const testX = p.x + Math.cos(angle) * distance;
           const testZ = p.z + Math.sin(angle) * distance;
           wall = hasWall(testX, testZ);
         }
-
-        // depth correction for fish-eye effect
         const corrected = distance * Math.cos(angle - p.angle);
-        const wallHeight = Math.min(state.height * 1.2, (state.height / Math.max(0.15, corrected)) * 0.9);
-        columns.push({ corrected, wallHeight, angle, index: i });
+        const wallHeight = Math.min(state.height * 1.15, (state.height / Math.max(0.15, corrected)) * 0.9);
+        columns.push({ corrected, wallHeight });
       }
       return columns;
     }
@@ -1029,7 +976,7 @@
     function drawBackground() {
       const sky = ctx.createLinearGradient(0, 0, 0, state.height);
       sky.addColorStop(0, '#1e2a2f');
-      sky.addColorStop(0.35, '#24363a');
+      sky.addColorStop(0.3, '#24363a');
       sky.addColorStop(1, '#0b1015');
       ctx.fillStyle = sky;
       ctx.fillRect(0, 0, state.width, state.height);
@@ -1159,12 +1106,49 @@
       ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
     }
 
+    function tick(ts) {
+      if (!state.running) {
+        requestAnimationFrame(tick);
+        return;
+      }
+
+      const dt = Math.min((ts - (state.lastTime || ts)) / 1000, 0.033);
+      state.lastTime = ts;
+      state.elapsed += dt;
+
+      if (keys[' '] && state.player.reloadTimer <= 0) shoot();
+      if (keys['r']) reload();
+
+      updatePlayer(dt);
+      updateTeam(dt);
+      updateParticles(dt);
+
+      state.spawnTimer -= dt;
+      if (state.spawnTimer <= 0) {
+        const active = state.zombies.length;
+        const desired = 7 + state.wave * 4;
+        if (active < desired) {
+          spawnZombie();
+        }
+        state.spawnTimer = Math.max(0.28, 1.2 - state.wave * 0.09);
+      }
+
+      updateZombies(dt);
+      nextWaveCheck();
+      checkEndConditions();
+      render();
+      updateHud();
+
+      requestAnimationFrame(tick);
+    }
+
     function onKey(ev, pressed) {
       const key = ev.key.toLowerCase();
       if (key === ' ') ev.preventDefault();
       keys[key] = pressed;
       if (key === 'r' && pressed) reload();
       if (key === 'e' && pressed) keys.e = true;
+      if (key === 'h' && pressed) keys.h = true;
     }
 
     window.addEventListener('keydown', (e) => onKey(e, true));
@@ -1207,11 +1191,10 @@
     });
 
     document.getElementById('howBtn').addEventListener('click', () => {
-      alert('Controls:\nWASD move\nMouse look\nClick / Space shoot\nR reload\nE revive teammate\nH heal with medkit\nShift sprint');
+      alert('Controls:\nWASD move\nMouse look\nClick / Space shoot\nR reload\nE revive teammate\nH medkit\nShift sprint');
     });
 
     window.addEventListener('resize', resize);
-
     resize();
     initGame();
     state.running = false;
